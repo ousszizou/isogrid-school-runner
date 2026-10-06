@@ -1,0 +1,36 @@
+name: Build school test image
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/build-image.yml]
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      IMAGE: ghcr.io/ousszizou/isogrid-school-runner:9b58d10
+      SOURCE_COMMIT: 9b58d106717b2305fe28311b5a66c16efdcd2c40
+    steps:
+      - name: Fetch reviewed public test code
+        run: |
+          git init .
+          git remote add origin https://github.com/ousszizou/isogrid-school-runner.git
+          git fetch --depth=1 origin "$SOURCE_COMMIT"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+      - name: Build and verify image tools
+        run: |
+          docker build --label org.opencontainers.image.source=https://github.com/ousszizou/isogrid-school-runner --label org.opencontainers.image.revision="$SOURCE_COMMIT" -t "$IMAGE" .
+          docker run --rm --entrypoint python3 "$IMAGE" -c 'import ast,pathlib,shutil; ast.parse(pathlib.Path("/runner/runner.py").read_text()); assert shutil.which("psql") and shutil.which("pgbench"); print("Runner syntax and PostgreSQL tools verified")'
+      - name: Publish test image to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_ACTOR: ${{ github.actor }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
+          docker push "$IMAGE"
+          docker logout ghcr.io
